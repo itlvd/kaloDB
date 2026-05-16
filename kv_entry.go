@@ -5,40 +5,59 @@ import (
 	"io"
 )
 
+const (
+	keyLenFieldSize = 4
+	valLenFieldSize = 4
+	deletedFlagSize = 1
+)
+
 type Entry struct {
-	key []byte
-	val []byte
+	key     []byte
+	val     []byte
+	deleted bool
 }
 
 func (ent *Entry) Encode() []byte {
-	data := make([]byte, 4 + 4 + len(ent.key) + len(ent.val))
+	headerSize := keyLenFieldSize + valLenFieldSize + deletedFlagSize
+	keyOffset := headerSize
+	valOffset := keyOffset + len(ent.key)
 
-	binary.LittleEndian.PutUint32(data[0:4], uint32(len(ent.key)))
-	binary.LittleEndian.PutUint32(data[4:8], uint32(len(ent.val)))
+	data := make([]byte, headerSize +len(ent.key)+len(ent.val))
 
-	copy(data[8:], ent.key)
-	copy(data[8 + len(ent.key):], ent.val)
+	binary.LittleEndian.PutUint32(data[0:keyLenFieldSize], uint32(len(ent.key)))
+	binary.LittleEndian.PutUint32(data[keyLenFieldSize:keyLenFieldSize + valLenFieldSize], uint32(len(ent.val)))
+
+	if ent.deleted {
+		data[keyLenFieldSize + valLenFieldSize] = 1
+	}
+
+	copy(data[keyOffset:valOffset], ent.key)
+	copy(data[valOffset:], ent.val)
 	return data
 }
 
 func (ent *Entry) Decode(r io.Reader) error {
-	header := make([]byte, 8)
+	headerSize := keyLenFieldSize + valLenFieldSize + deletedFlagSize
 
+	header := make([]byte, headerSize)
 	_, err := io.ReadFull(r, header)
 	if err != nil {
 		return err
 	}
 
-	sizeKey := binary.LittleEndian.Uint32(header[0:4])
-	sizeVal := binary.LittleEndian.Uint32(header[4:8])
+	if header[headerSize - deletedFlagSize] == 1 {
+		ent.deleted = true
+	}
 
-	key := make([]byte, sizeKey)
-	val := make([]byte, sizeVal)
+	keySize := binary.LittleEndian.Uint32(header[0:keyLenFieldSize])
+	valSize := binary.LittleEndian.Uint32(header[keyLenFieldSize:keyLenFieldSize+valLenFieldSize])
 
+	key := make([]byte, keySize)
 	if _, err := io.ReadFull(r, key); err != nil {
 		return err
 	}
 
+	val := make([]byte, valSize)
 	if _, err := io.ReadFull(r, val); err != nil {
 		return err
 	}

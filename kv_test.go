@@ -35,8 +35,9 @@ func TestKVBasic(t *testing.T) {
 
 func TestEntryEncode(t *testing.T) {
 	ent := Entry{
-		key: []byte("name"),
-		val: []byte("dong"),
+		key:     []byte("name"),
+		val:     []byte("dong"),
+		deleted: false,
 	}
 
 	got := ent.Encode()
@@ -44,6 +45,29 @@ func TestEntryEncode(t *testing.T) {
 	want := []byte{
 		0x04, 0x00, 0x00, 0x00, // key length = 4
 		0x04, 0x00, 0x00, 0x00, // value length = 4
+		0x00, // deleted = false
+		'n', 'a', 'm', 'e',
+		'd', 'o', 'n', 'g',
+	}
+
+	if !bytes.Equal(got, want) {
+		t.Fatalf("Encode() mismatch\nwant: %v\ngot:  %v", want, got)
+	}
+}
+
+func TestEntryEncodeDeleted(t *testing.T) {
+	ent := Entry{
+		key:     []byte("name"),
+		val:     []byte("dong"),
+		deleted: true,
+	}
+
+	got := ent.Encode()
+
+	want := []byte{
+		0x04, 0x00, 0x00, 0x00, // key length = 4
+		0x04, 0x00, 0x00, 0x00, // value length = 4
+		0x01, // deleted = true
 		'n', 'a', 'm', 'e',
 		'd', 'o', 'n', 'g',
 	}
@@ -55,8 +79,9 @@ func TestEntryEncode(t *testing.T) {
 
 func TestEntryDecode(t *testing.T) {
 	original := Entry{
-		key: []byte("name"),
-		val: []byte("dong"),
+		key:     []byte("name"),
+		val:     []byte("dong"),
+		deleted: false,
 	}
 
 	data := original.Encode()
@@ -79,20 +104,39 @@ func TestEntryDecode(t *testing.T) {
 func TestEntryEncodeDecodeRoundTrip(t *testing.T) {
 	tests := []Entry{
 		{
-			key: []byte("name"),
-			val: []byte("dong"),
+			key:     []byte("name"),
+			val:     []byte("dong"),
+			deleted: false,
 		},
 		{
-			key: []byte(""),
-			val: []byte("empty key"),
+			key:     []byte(""),
+			val:     []byte("empty key"),
+			deleted: false,
 		},
 		{
-			key: []byte("empty value"),
-			val: []byte(""),
+			key:     []byte("empty value"),
+			val:     []byte(""),
+			deleted: false,
 		},
 		{
-			key: []byte("hello"),
-			val: []byte("world"),
+			key:     []byte("hello"),
+			val:     []byte("world"),
+			deleted: false,
+		},
+		{
+			key:     []byte("tombstone"),
+			val:     []byte(""),
+			deleted: true,
+		},
+		{
+			key:     []byte("deleted-with-value"),
+			val:     []byte("old"),
+			deleted: true,
+		},
+		{
+			key:     []byte(""),
+			val:     []byte(""),
+			deleted: true,
 		},
 	}
 
@@ -117,13 +161,15 @@ func TestEntryEncodeDecodeRoundTrip(t *testing.T) {
 
 func TestEntryDecodeMultipleEntries(t *testing.T) {
 	ent1 := Entry{
-		key: []byte("name"),
-		val: []byte("dong"),
+		key:     []byte("name"),
+		val:     []byte("dong"),
+		deleted: false,
 	}
 
 	ent2 := Entry{
-		key: []byte("lang"),
-		val: []byte("go"),
+		key:     []byte("lang"),
+		val:     []byte("go"),
+		deleted: true,
 	}
 
 	data := append(ent1.Encode(), ent2.Encode()...)
@@ -162,10 +208,25 @@ func TestEntryDecodeShortHeader(t *testing.T) {
 	}
 }
 
+func TestEntryDecodeMissingDeletedFlag(t *testing.T) {
+	data := []byte{
+		0x04, 0x00, 0x00, 0x00, // key length = 4
+		0x04, 0x00, 0x00, 0x00, // value length = 4
+		// missing deleted flag and the key/val bytes
+	}
+
+	var ent Entry
+	err := ent.Decode(bytes.NewReader(data))
+	if err == nil {
+		t.Fatal("expected error for missing deleted flag, got nil")
+	}
+}
+
 func TestEntryDecodeShortKey(t *testing.T) {
 	original := Entry{
-		key: []byte("name"),
-		val: []byte("dong"),
+		key:     []byte("name"),
+		val:     []byte("dong"),
+		deleted: false,
 	}
 
 	data := original.Encode()
@@ -181,8 +242,9 @@ func TestEntryDecodeShortKey(t *testing.T) {
 
 func TestEntryDecodeShortValue(t *testing.T) {
 	original := Entry{
-		key: []byte("name"),
-		val: []byte("dong"),
+		key:     []byte("name"),
+		val:     []byte("dong"),
+		deleted: false,
 	}
 
 	data := original.Encode()
@@ -210,8 +272,9 @@ func (s slowReader) Read(p []byte) (int, error) {
 
 func TestEntryDecodeWithSlowReader(t *testing.T) {
 	original := Entry{
-		key: []byte("name"),
-		val: []byte("dong"),
+		key:     []byte("name"),
+		val:     []byte("dong"),
+		deleted: true,
 	}
 
 	data := original.Encode()
