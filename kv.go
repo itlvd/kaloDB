@@ -12,20 +12,20 @@ func (kv *KV) Open() error {
 
 	kv.mem = map[string][]byte{}
 	for {
-		newEntry := Entry{}
-		eof, err := kv.log.Read(&newEntry)
+		newEntry := &Entry{}
+		eof, err := kv.log.Read(newEntry)
 		if err != nil {
 			return err
+		}
+
+		if eof {
+			break
 		}
 
 		if newEntry.deleted {
 			delete(kv.mem, string(newEntry.key))
 		} else {
 			kv.mem[string(newEntry.key)] = newEntry.val
-		}
-
-		if eof {
-			break
 		}
 	}
 	return nil
