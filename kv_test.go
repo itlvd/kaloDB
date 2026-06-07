@@ -252,6 +252,244 @@ func TestKVBasic(t *testing.T) {
 	assert.True(t, string(val) == "v2" && ok && err == nil)
 }
 
+func TestKVSetExUpsert(t *testing.T) {
+	kv := KV{}
+	kv.log.FileName = ".test_upsert"
+	defer os.Remove(kv.log.FileName)
+	os.Remove(kv.log.FileName)
+
+	assert.Nil(t, kv.Open())
+	defer kv.Close()
+
+	// new key → updated
+	updated, err := kv.SetEx([]byte("k"), []byte("v1"), ModeUpsert)
+	assert.Nil(t, err)
+	assert.True(t, updated)
+
+	// same value → not updated
+	updated, err = kv.SetEx([]byte("k"), []byte("v1"), ModeUpsert)
+	assert.Nil(t, err)
+	assert.False(t, updated)
+
+	// different value → updated
+	updated, err = kv.SetEx([]byte("k"), []byte("v2"), ModeUpsert)
+	assert.Nil(t, err)
+	assert.True(t, updated)
+
+	val, ok, err := kv.Get([]byte("k"))
+	assert.Nil(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, []byte("v2"), val)
+}
+
+func TestKVSetExInsert(t *testing.T) {
+	kv := KV{}
+	kv.log.FileName = ".test_insert"
+	defer os.Remove(kv.log.FileName)
+	os.Remove(kv.log.FileName)
+
+	assert.Nil(t, kv.Open())
+	defer kv.Close()
+
+	// insert new key → updated
+	updated, err := kv.SetEx([]byte("k"), []byte("v1"), ModeInsert)
+	assert.Nil(t, err)
+	assert.True(t, updated)
+
+	// insert duplicate → not updated, value unchanged
+	updated, err = kv.SetEx([]byte("k"), []byte("v2"), ModeInsert)
+	assert.Nil(t, err)
+	assert.False(t, updated)
+
+	val, ok, err := kv.Get([]byte("k"))
+	assert.Nil(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, []byte("v1"), val)
+}
+
+func TestKVSetExUpdate(t *testing.T) {
+	kv := KV{}
+	kv.log.FileName = ".test_update"
+	defer os.Remove(kv.log.FileName)
+	os.Remove(kv.log.FileName)
+
+	assert.Nil(t, kv.Open())
+	defer kv.Close()
+
+	// update non-existent key → not updated, no error
+	updated, err := kv.SetEx([]byte("missing"), []byte("v1"), ModeUpdate)
+	assert.Nil(t, err)
+	assert.False(t, updated)
+
+	_, ok, _ := kv.Get([]byte("missing"))
+	assert.False(t, ok)
+
+	// seed a key then update it
+	kv.SetEx([]byte("k"), []byte("v1"), ModeInsert)
+
+	// update with same value → not updated
+	updated, err = kv.SetEx([]byte("k"), []byte("v1"), ModeUpdate)
+	assert.Nil(t, err)
+	assert.False(t, updated)
+
+	// update with new value → updated
+	updated, err = kv.SetEx([]byte("k"), []byte("v2"), ModeUpdate)
+	assert.Nil(t, err)
+	assert.True(t, updated)
+
+	val, ok, err := kv.Get([]byte("k"))
+	assert.Nil(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, []byte("v2"), val)
+}
+
+func TestKVSetExUnsupportedMode(t *testing.T) {
+	kv := KV{}
+	kv.log.FileName = ".test_badmode"
+	defer os.Remove(kv.log.FileName)
+	os.Remove(kv.log.FileName)
+
+	assert.Nil(t, kv.Open())
+	defer kv.Close()
+
+	_, err := kv.SetEx([]byte("k"), []byte("v"), UpdateMode(99))
+	assert.NotNil(t, err)
+}
+
+func forceCloseLog(kv *KV) {
+	kv.log.fp.Close()
+}
+
+func TestKVSetWriteError(t *testing.T) {
+	kv := KV{}
+	kv.log.FileName = ".test_write_err"
+	defer os.Remove(kv.log.FileName)
+	os.Remove(kv.log.FileName)
+
+	assert.Nil(t, kv.Open())
+
+	forceCloseLog(&kv)
+
+	updated, err := kv.Set([]byte("k"), []byte("v"))
+	assert.NotNil(t, err)
+	assert.False(t, updated)
+
+	// mem must not be updated on error
+	_, ok, _ := kv.Get([]byte("k"))
+	assert.False(t, ok)
+}
+
+func TestKVDelWriteError(t *testing.T) {
+	kv := KV{}
+	kv.log.FileName = ".test_del_err"
+	defer os.Remove(kv.log.FileName)
+	os.Remove(kv.log.FileName)
+
+	assert.Nil(t, kv.Open())
+	kv.Set([]byte("k"), []byte("v"))
+
+	forceCloseLog(&kv)
+
+	deleted, err := kv.Del([]byte("k"))
+	assert.NotNil(t, err)
+	assert.False(t, deleted)
+
+	// key must still be in mem after failed delete
+	val, ok, _ := kv.Get([]byte("k"))
+	assert.True(t, ok)
+	assert.Equal(t, []byte("v"), val)
+}
+
+func TestKVSetExInsertWriteError(t *testing.T) {
+	kv := KV{}
+	kv.log.FileName = ".test_insert_err"
+	defer os.Remove(kv.log.FileName)
+	os.Remove(kv.log.FileName)
+
+	assert.Nil(t, kv.Open())
+
+	forceCloseLog(&kv)
+
+	updated, err := kv.SetEx([]byte("k"), []byte("v"), ModeInsert)
+	assert.NotNil(t, err)
+	assert.False(t, updated)
+
+	_, ok, _ := kv.Get([]byte("k"))
+	assert.False(t, ok)
+}
+
+func TestKVSetExUpdateWriteError(t *testing.T) {
+	kv := KV{}
+	kv.log.FileName = ".test_update_err"
+	defer os.Remove(kv.log.FileName)
+	os.Remove(kv.log.FileName)
+
+	assert.Nil(t, kv.Open())
+
+	// seed key via a fresh open/close so mem has it
+	kv.log.fp.WriteString("") // no-op, file is open
+	// write directly into mem to have a key without going through log
+	kv.mem["k"] = []byte("old")
+
+	forceCloseLog(&kv)
+
+	updated, err := kv.SetEx([]byte("k"), []byte("new"), ModeUpdate)
+	assert.NotNil(t, err)
+	assert.False(t, updated)
+
+	// mem must keep old value
+	val, ok, _ := kv.Get([]byte("k"))
+	assert.True(t, ok)
+	assert.Equal(t, []byte("old"), val)
+}
+
+func TestKVDelNonExistent(t *testing.T) {
+	kv := KV{}
+	kv.log.FileName = ".test_del_missing"
+	defer os.Remove(kv.log.FileName)
+	os.Remove(kv.log.FileName)
+
+	assert.Nil(t, kv.Open())
+	defer kv.Close()
+
+	deleted, err := kv.Del([]byte("nope"))
+	assert.Nil(t, err)
+	assert.False(t, deleted)
+}
+
+func TestKVPersistMultipleOps(t *testing.T) {
+	kv := KV{}
+	kv.log.FileName = ".test_persist_ops"
+	defer os.Remove(kv.log.FileName)
+	os.Remove(kv.log.FileName)
+
+	assert.Nil(t, kv.Open())
+
+	kv.SetEx([]byte("a"), []byte("1"), ModeInsert)
+	kv.SetEx([]byte("b"), []byte("2"), ModeInsert)
+	kv.SetEx([]byte("a"), []byte("10"), ModeUpdate) // update a
+	kv.Del([]byte("b"))                             // delete b
+	kv.SetEx([]byte("c"), []byte("3"), ModeUpsert)  // upsert new
+
+	kv.Close()
+	assert.Nil(t, kv.Open())
+	defer kv.Close()
+
+	val, ok, err := kv.Get([]byte("a"))
+	assert.Nil(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, []byte("10"), val)
+
+	_, ok, err = kv.Get([]byte("b"))
+	assert.Nil(t, err)
+	assert.False(t, ok)
+
+	val, ok, err = kv.Get([]byte("c"))
+	assert.Nil(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, []byte("3"), val)
+}
+
 func TestKVRecovery(t *testing.T) {
 	kv := KV{}
 	kv.log.FileName = ".test_db"
