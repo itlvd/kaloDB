@@ -51,71 +51,31 @@ const (
 )
 
 func (kv *KV) SetEx(key []byte, val []byte, mode UpdateMode) (updated bool, err error) {
+	prev, exist := kv.mem[string(key)]
 	switch mode {
 	case ModeUpsert:
-		return kv.setUpsert(key, val)
+		updated = !exist || string(prev) != string(val)
 	case ModeUpdate:
-		return kv.setUpdate(key, val)
+		updated = exist && string(prev) != string(val)
 	case ModeInsert:
-		return kv.setInsert(key, val)
+		updated = !exist
 	default:
 		return false, errors.New("mode does not supported")
 	}
-}
 
-func (kv *KV) setUpsert(key []byte, val []byte) (updated bool, err error) {
-	prev, exist := kv.mem[string(key)]
-	if exist && string(prev) == string(val) {
-		return false, nil
+	if updated {
+		if err = kv.log.Write(&Entry{
+			key:     key,
+			val:     val,
+			deleted: false,
+		}); err != nil {
+			return false, err
+		}
+
+		kv.mem[string(key)] = val
 	}
 
-	if err = kv.log.Write(&Entry{
-		key:     key,
-		val:     val,
-		deleted: false,
-	}); err != nil {
-		return false, err
-	}
-
-	kv.mem[string(key)] = val
-	updated = string(prev) != string(val) || !exist
-	return updated, err
-}
-
-func (kv *KV) setInsert(key []byte, val []byte) (updated bool, err error) {
-	_, exist := kv.mem[string(key)]
-	if exist {
-		return false, nil
-	}
-
-	if err = kv.log.Write(&Entry{
-		key:     key,
-		val:     val,
-		deleted: false,
-	}); err != nil {
-		return false, err
-	}
-
-	kv.mem[string(key)] = val
-	return true, nil
-}
-
-func (kv *KV) setUpdate(key []byte, val []byte) (updated bool, err error) {
-	prev, exist := kv.mem[string(key)]
-	if !exist || string(prev) == string(val) {
-		return false, nil
-	}
-
-	if err = kv.log.Write(&Entry{
-		key:     key,
-		val:     val,
-		deleted: false,
-	}); err != nil {
-		return false, err
-	}
-
-	kv.mem[string(key)] = val
-	return true, nil
+	return updated, nil
 }
 
 func (kv *KV) Set(key []byte, val []byte) (updated bool, err error) {
